@@ -1,0 +1,6 @@
+{
+    "settings": {
+        "index.mapping.total_fields.limit": 5000,
+        "index.query.default_field": 5000
+    }
+}

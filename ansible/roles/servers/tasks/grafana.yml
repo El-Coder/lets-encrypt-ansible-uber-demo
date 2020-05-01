@@ -1,0 +1,78 @@
+---
+- name: "Restart grafana container"
+  docker_compose:
+    project_src: "~/"
+    services: grafana
+    restarted: true
+    state: present
+  register: output
+
+- name: "Wait for grafana to come up"
+  uri:
+    url: "{{ grafana_base_url }}/login"
+    status_code: 200
+  register: result
+  until: result.status == 200
+  retries: 10
+  delay: 5
+
+- name: Get all existing datasources
+  uri:
+    url: "{{ grafana_base_url }}/api/datasources"
+    user: "{{ grafana_username }}"
+    password: "{{ grafana_password }}"
+    method: GET
+    force_basic_auth: true
+    status_code: 200
+  register: grafana_datasources
+
+- name: Create datasource list from json
+  set_fact:
+    grafana_datasources_list: "{{ grafana_datasources.json | json_query('[*].name') }}"
+      
+- name: Delete all existing datasources
+  uri:
+    url: "{{ grafana_base_url }}/api/datasources/name/{{ item }}"
+    user: "{{ grafana_username }}"
+    password: "{{ grafana_password }}"
+    method: DELETE
+    force_basic_auth: true
+    status_code: 200
+  loop: "{{ grafana_datasources_list }}"
+
+- name: Create grafana datasources
+  uri:
+    url: "{{ grafana_base_url }}/api/datasources"
+    user: "{{ grafana_username }}"
+    password: "{{ grafana_password }}"
+    method: POST
+    body: "{{ lookup('file', item) }}"
+    force_basic_auth: true
+    status_code: 200
+    body_format: json
+  with_fileglob:
+    - "{{ role_path }}/files/grafana/datasources/*.json"
+
+- name: Create grafana dashboard
+  uri:
+    url: "{{ grafana_base_url }}/api/dashboards/db"
+    user: "{{ grafana_username }}"
+    password: "{{ grafana_password }}"
+    method: POST
+    body: "{{ lookup('file', item) }}"
+    force_basic_auth: true
+    status_code: 200
+    body_format: json
+  with_fileglob:
+    - "{{ role_path }}/files/grafana/dashboards/*.json"
+
+- name: Set default dashboard
+  uri:
+    url: "{{ grafana_base_url }}/api/org/preferences"
+    user: "{{ grafana_username }}"
+    password: "{{ grafana_password }}"
+    method: PUT
+    body: '{"homeDashboardId":1}'
+    force_basic_auth: true
+    status_code: 200
+    body_format: json

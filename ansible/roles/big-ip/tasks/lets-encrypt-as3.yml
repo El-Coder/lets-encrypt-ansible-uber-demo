@@ -1,0 +1,289 @@
+---
+
+- name: "Check if Lets Encrypt Directory Exist"  
+  file:
+    path: "/etc/letsencrypt/{{ item }}"
+    state: touch
+    mode: u=rwx,g=x,o=x
+  with_items:
+    - account
+    - certs
+    - csrs
+    - keys
+  register: stat_result
+  ignore_errors: True 
+
+
+- name: "Delete Existing Lets Encrypt Directory"
+  file:
+    path: "/etc/letsencrypt/{{ item }}"
+    state: absent
+    mode: u=rwx,g=x,o=x
+  with_items:
+    - account
+    - certs
+    - csrs
+    - keys
+
+
+- name: "Create required directories in /etc/letsencrypt"
+  file:
+    path: "/etc/letsencrypt/{{ item }}"
+    state: directory
+    owner: root
+    mode: u=rwx,g=x,o=x
+  with_items:
+  - account
+  - certs
+  - csrs
+  - keys
+- name: "Generate a Let's Encrypt account key"
+  shell: "if [ ! -f {{ letsencrypt_account_key }} ]; then openssl genrsa 4096 | sudo tee {{ letsencrypt_account_key }}; fi"
+- name: "Generate Let's Encrypt private key"
+  shell: "openssl genrsa 4096 | sudo tee /etc/letsencrypt/keys/{{ domain_name }}.key"
+- name: "Generate Let's Encrypt CSR"
+  shell: "openssl req -new -sha256 -key /etc/letsencrypt/keys/{{ domain_name }}.key -subj \"/CN={{ domain_name }}\" -reqexts SAN -config <(cat /etc/ssl/openssl.cnf <(printf \"\n[SAN]\nsubjectAltName=DNS:{{ domain_name }},DNS:www.{{ domain_name }}\")) | sudo tee /etc/letsencrypt/csrs/{{ domain_name }}.csr"
+  args:
+    executable: /bin/bash
+
+  
+- name: "Begin Let's Encrypt challenges"
+  acme_certificate:
+    acme_directory: "{{ acme_directory }}"
+    acme_version: "{{ acme_version }}"
+    account_key_src: "{{ letsencrypt_account_key }}"
+    account_email: "{{ acme_email }}"
+    terms_agreed: 1
+    challenge: "{{ acme_challenge_type }}"
+    csr: "{{ letsencrypt_csrs_dir }}/{{ domain_name }}.csr"
+    dest: "{{ letsencrypt_certs_dir }}/{{ domain_name }}.crt"
+    fullchain_dest: "{{ letsencrypt_certs_dir }}/fullchain_{{ domain_name }}.crt"
+    remaining_days: 91
+    #edit domain name here
+  register: acme_challenge_a1tdemo_com
+- debug:
+    var: acme_challenge_a1tdemo_com
+    
+- name: "Create .well-known/acme-challenge directory"
+  file:
+    path: /var/www/html/.well-known/acme-challenge
+    state: directory
+    owner: root
+    mode: u=rwx,g=rx,o=rx
+
+- name: "Get AWS DNS TXT Details"
+  route53:
+    aws_access_key: "{{ lookup('file', '/home/azureuser/access_key.txt') }}"
+    aws_secret_key: "{{ lookup('file', '/home/azureuser/secret_key.txt') }}"
+    state: get
+    zone: "{{ domain_name }}"
+    #edit domain name here
+    record: _acme-challenge.www.a1tdemo.com
+    type: TXT
+  register: rec
+  ignore_errors: True      
+  
+- name: "Get AWS DNS2 TXT Details"
+  route53:
+    aws_access_key: "{{ lookup('file', '/home/azureuser/access_key.txt') }}"
+    aws_secret_key: "{{ lookup('file', '/home/azureuser/secret_key.txt') }}"
+    state: get
+    zone: "{{ domain_name }}"
+    #edit domain name here
+    record: _acme-challenge.a1tdemo.com
+    type: TXT
+  register: rec2
+  ignore_errors: True 
+ 
+- name: "Get AWS DNS A Record Details"
+  route53:
+    aws_access_key: "{{ lookup('file', '/home/azureuser/access_key.txt') }}"
+    aws_secret_key: "{{ lookup('file', '/home/azureuser/secret_key.txt') }}"
+    state: get
+    zone: "{{ domain_name }}"
+    #edit domain name here
+    record: www.a1tdemo.com
+    type: A
+  register: Arec
+  ignore_errors: True      
+  
+- name: "Get AWS DNS2 A Record Details"
+  route53:
+    aws_access_key: "{{ lookup('file', '/home/azureuser/access_key.txt') }}"
+    aws_secret_key: "{{ lookup('file', '/home/azureuser/secret_key.txt') }}"
+    state: get
+    zone: "{{ domain_name }}"
+    #edit domain name here
+    record: a1tdemo.com
+    type: A
+  register: Arec2
+  ignore_errors: True   
+
+- name: "Delete Existing DNS A Record"
+  route53:
+    aws_access_key: "{{ lookup('file', '/home/azureuser/access_key.txt') }}"
+    aws_secret_key: "{{ lookup('file', '/home/azureuser/secret_key.txt') }}"
+    state: absent
+    zone: "{{ domain_name }}"
+    record: "{{ Arec.set.record }}"
+    ttl: "{{ Arec.set.ttl }}"
+    type: "{{ Arec.set.type }}"
+    value: "{{ Arec.set.value }}"
+  when: Arec.set.record is defined 
+
+- name: "Delete Second Existing DNS A Record"
+  route53:
+    aws_access_key: "{{ lookup('file', '/home/azureuser/access_key.txt') }}"
+    aws_secret_key: "{{ lookup('file', '/home/azureuser/secret_key.txt') }}"
+    state: absent
+    zone: "{{ domain_name }}"
+    record: "{{ Arec2.set.record }}"
+    ttl: "{{ Arec2.set.ttl }}"
+    type: "{{ Arec2.set.type }}"
+    value: "{{ Arec2.set.value }}"  
+  when: Arec2.set.record is defined 
+
+#Create A record for www.Domain
+- name: "Create DNS A Record"
+  route53:
+    aws_access_key: "{{ lookup('file', '/home/azureuser/access_key.txt') }}"
+    aws_secret_key: "{{ lookup('file', '/home/azureuser/secret_key.txt') }}"
+    state: present
+    zone: "{{ domain_name }}"
+    record: www.a1tdemo.com
+    ttl: 60
+    type: A
+    value:
+      - "{{juiceshop_public_ip_1}}"
+      - "{{juiceshop_public_ip_2}}"
+    
+   
+
+#Create A record for Domain
+- name: "Create Second DNS A Record"
+  route53:
+    aws_access_key: "{{ lookup('file', '/home/azureuser/access_key.txt') }}"
+    aws_secret_key: "{{ lookup('file', '/home/azureuser/secret_key.txt') }}"
+    state: present
+    zone: "{{ domain_name }}"
+    #edit domain name here
+    record: a1tdemo.com
+    ttl: 60
+    type: A
+    value: 
+      - "{{juiceshop_public_ip_1}}"
+      - "{{juiceshop_public_ip_2}}"
+    
+  
+
+- name: "Delete Existing DNS TXT Record"
+  route53:
+    aws_access_key: "{{ lookup('file', '/home/azureuser/access_key.txt') }}"
+    aws_secret_key: "{{ lookup('file', '/home/azureuser/secret_key.txt') }}"
+    state: absent
+    zone: "{{ domain_name }}"
+    record: "{{ rec.set.record }}"
+    ttl: "{{ rec.set.ttl }}"
+    type: "{{ rec.set.type }}"
+    value: "{{ rec.set.value }}"
+  when: rec.set.record is defined 
+
+- name: "Delete Second Existing DNS TXT Record"
+  route53:
+    aws_access_key: "{{ lookup('file', '/home/azureuser/access_key.txt') }}"
+    aws_secret_key: "{{ lookup('file', '/home/azureuser/secret_key.txt') }}"
+    state: absent
+    zone: "{{ domain_name }}"
+    record: "{{ rec2.set.record }}"
+    ttl: "{{ rec2.set.ttl }}"
+    type: "{{ rec2.set.type }}"
+    value: "{{ rec2.set.value }}"  
+  when: rec2.set.record is defined 
+
+
+#Create DNS TXT record
+- name: "AWS"
+  route53:
+    command: create
+    aws_access_key: "{{ lookup('file', '/home/azureuser/access_key.txt') }}"
+    aws_secret_key: "{{ lookup('file', '/home/azureuser/secret_key.txt') }}"
+    zone: "{{ domain_name }}"
+    type: TXT
+    ttl: 60
+    state: present
+    #edit domain name here
+    record: "{{ acme_challenge_a1tdemo_com['challenge_data']['www.a1tdemo.com']['dns-01'].record }}"
+    #edit domain name here
+    value: "{{ acme_challenge_a1tdemo_com['challenge_data']['www.a1tdemo.com']['dns-01'].resource_value | regex_replace('^(.*)$', '\"\\1\"') }}"
+    wait: yes
+  when: acme_challenge_a1tdemo_com is changed 
+  
+#Create Second TXT record
+- name: "AWS2"
+  route53:
+    command: create
+    aws_access_key: "{{ lookup('file', '/home/azureuser/access_key.txt') }}"
+    aws_secret_key: "{{ lookup('file', '/home/azureuser/secret_key.txt') }}"
+    zone: "{{ domain_name }}"
+    type: TXT
+    ttl: 60
+    state: present
+    #edit domain name here
+    record: "{{ acme_challenge_a1tdemo_com['challenge_data']['a1tdemo.com']['dns-01'].record }}"
+    #edit domain name here
+    value: "{{ acme_challenge_a1tdemo_com['challenge_data']['a1tdemo.com']['dns-01'].resource_value | regex_replace('^(.*)$', '\"\\1\"') }}"
+    wait: yes
+  when: acme_challenge_a1tdemo_com is changed   
+  
+
+- name: "Complete Let's Encrypt challenges"
+  acme_certificate:
+    acme_directory: "{{ acme_directory }}"
+    acme_version: "{{ acme_version }}"
+    account_key_src: "{{ letsencrypt_account_key }}"
+    account_email: "{{ acme_email }}"
+    challenge: "{{ acme_challenge_type }}"
+    csr: "{{ letsencrypt_csrs_dir }}/{{ domain_name }}.csr"
+    dest: "{{ letsencrypt_certs_dir }}/{{ domain_name }}.crt"
+    chain_dest: "{{ letsencrypt_certs_dir }}/chain_{{ domain_name }}.crt"
+    fullchain_dest: "{{ letsencrypt_certs_dir }}/fullchain_{{ domain_name }}"
+    #edit domain name here
+    data: "{{ acme_challenge_a1tdemo_com }}"
+
+
+#Random Number Generator
+- name: Random Generator
+  set_fact:
+    new_cert: "{{ 100000 | random }}"
+  run_once: yes
+  
+
+#import Cert and Key onto BIG-IP
+- name: Use a file lookup to import PEM Certificate
+  bigip_ssl_certificate:
+    name: lets_encrypt_cert_{{new_cert}}
+    state: present
+    content: "{{ lookup('file', '/etc/letsencrypt/certs/a1tdemo.com.crt') }}"
+    provider: "{{bigip_provider}}"
+  delegate_to: localhost
+
+- name: Use a file lookup to import key
+  bigip_ssl_key:
+    name: lets_encrypt_cert_{{new_cert}}
+    state: present
+    content: "{{ lookup('file', '/etc/letsencrypt/keys/a1tdemo.com.key') }}"
+    provider: "{{bigip_provider}}"
+  delegate_to: localhost  
+
+- name: Prepare the AS3 Lets Encrypt application declaration from the template
+  template:
+    src: "{{ role_path }}/templates/{{ as3_lets_encrypt_template }}"
+    dest: "{{ tmp_dir }}/{{ as3_lets_encrypt_declaration }}"
+
+- name: Deploy app with Lets Encrypt
+  bigip_appsvcs_extension:
+    content: "{{ lookup('file', '{{ tmp_dir }}/{{ as3_lets_encrypt_declaration }}') }}"
+    state: present
+    provider: "{{ bigip_provider }}"
+  delegate_to: localhost
+   

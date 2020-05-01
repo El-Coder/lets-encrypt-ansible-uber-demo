@@ -1,0 +1,10 @@
+*.pyc
+ansible/roles/ansible-netplan
+ansible/roles/big-ip/files/tmp/
+
+*.lock
+output.har
+
+# ignore downloaded packages
+*.deb
+*.rpm

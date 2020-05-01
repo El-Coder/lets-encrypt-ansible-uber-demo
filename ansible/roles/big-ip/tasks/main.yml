@@ -1,0 +1,12 @@
+---
+- name: Create the tmp folder of does not exist
+  file: path={{ tmp_dir }} state=directory mode=0755
+  tags: [ tmp ]
+
+- name: Configure BIG-IP
+  import_tasks: configure-big-ip.yml
+  tags: [ configure ]
+
+- name: Add Lets Encrypt 
+  import_tasks: lets-encrypt-as3.yml
+  tags: [ letsencrypt ]

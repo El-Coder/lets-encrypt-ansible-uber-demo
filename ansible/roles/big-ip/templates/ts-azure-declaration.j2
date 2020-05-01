@@ -1,0 +1,21 @@
+{
+    "class": "Telemetry",
+    "My_System": {
+        "class": "Telemetry_System",
+        "systemPoller": {
+            "interval": 60
+        }
+    },
+    "My_Listener": {
+        "class": "Telemetry_Listener",
+        "port": 6515
+    },
+    "My_Consumer": {
+        "class": "Telemetry_Consumer",
+        "type": "Azure_Log_Analytics",
+        "workspaceId": "{{azure_log_id}}",
+        "passphrase": {
+            "cipherText": "{{azure_log_key}}"
+        }
+    }
+}
